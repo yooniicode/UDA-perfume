@@ -36,7 +36,7 @@ logging.getLogger('undetected_chromedriver').setLevel(logging.WARNING)
 os.environ['WDM_LOG'] = '0'
 
 # --- 1. 설정 ---
-SEARCH_KEYWORD = "dior"
+SEARCH_KEYWORD = "acqua di parma"
 PERFUME_CSV_FILE = f'parfumo_perfumes_{SEARCH_KEYWORD}.csv'
 REVIEW_CSV_FILE = f'parfumo_reviews_{SEARCH_KEYWORD}.csv'
 RATE_LIMIT_DELAY = 0.3
