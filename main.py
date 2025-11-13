@@ -162,8 +162,12 @@ class DriverPool:
     def _create_driver(self):
         """단일 드라이버 생성 (쿠키 사전 설정 포함)"""
         options = uc.ChromeOptions()
-        # 로컬에서는 headless=False로 테스트 권장
-        # options.add_argument('--headless=new')
+        # 메모리 관련 옵션 추가
+        options.add_argument('--memory-pressure-off')
+        options.add_argument('--disable-background-timer-throttling')
+        options.add_argument('--disable-renderer-backgrounding')
+
+        # 기존 옵션들
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
@@ -177,9 +181,10 @@ class DriverPool:
         )
 
         driver = uc.Chrome(options=options, use_subprocess=False)
+        driver.set_page_load_timeout(30)  # 타임아웃 추가
         driver.implicitly_wait(3)
 
-        # 🆕 메인 페이지 방문하여 쿠키 처리
+        # 메인 페이지 방문하여 쿠키 처리
         try:
             driver.get("https://www.parfumo.com/")
             if handle_cookie_popup(driver):
@@ -190,13 +195,47 @@ class DriverPool:
 
         return driver
 
+    def create_driver(self):
+        """public 메서드 추가 - 외부에서 새 드라이버 생성 시 사용"""
+        return self._create_driver()
+
+    def is_driver_alive(self, driver):
+        """드라이버가 살아있는지 확인"""
+        try:
+            _ = driver.current_url
+            _ = driver.window_handles
+            return True
+        except:
+            return False
+
     def get(self):
-        """풀에서 드라이버 가져오기"""
-        return self.pool.get()
+        """풀에서 건강한 드라이버 가져오기"""
+        driver = self.pool.get()
+
+        # 드라이버 상태 확인
+        if not self.is_driver_alive(driver):
+            print(f"      ⚠️ 죽은 드라이버 감지, 새로 생성 중...")
+            try:
+                driver.quit()
+            except:
+                pass
+            driver = self._create_driver()
+
+        return driver
 
     def put(self, driver):
-        """풀에 드라이버 반환"""
-        self.pool.put(driver)
+        """건강한 드라이버만 풀에 반환"""
+        if self.is_driver_alive(driver):
+            self.pool.put(driver)
+        else:
+            # 죽은 드라이버는 새로 생성해서 반환
+            print(f"      ⚠️ 죽은 드라이버 대체 중...")
+            try:
+                driver.quit()
+            except:
+                pass
+            new_driver = self._create_driver()
+            self.pool.put(new_driver)
 
     def close_all(self):
         """모든 드라이버 종료"""
@@ -581,46 +620,110 @@ def process_single_product(args, driver_pool):
     """단일 제품 처리 (드라이버 풀 사용)."""
     url, index, total = args
     driver = None
+    retry_count = 0
+    max_retries = 3
 
-    try:
-        # 풀에서 드라이버 가져오기
-        driver = driver_pool.get()
-        driver.get(url)
+    while retry_count < max_retries:
+        try:
+            # 풀에서 드라이버 가져오기
+            driver = driver_pool.get()
 
-        # 제품 정보 스크랩
-        product_name, product_data = scrape_product_details(driver)
-        write_batch_to_csv(PERFUME_CSV_FILE, PERFUME_FIELDNAMES, [product_data])
+            # 드라이버 건강 체크
+            try:
+                _ = driver.current_url
+            except:
+                # 드라이버가 죽었으면 새로 생성
+                safe_print(f"      ⚠️ 드라이버 세션 종료 감지, 새 드라이버 생성 중...")
+                try:
+                    driver.quit()
+                except:
+                    pass
+                driver = driver_pool._create_driver()
 
-        # 리뷰 스크랩
-        reviews_batch = scrape_reviews(driver, product_name)
-        if reviews_batch:
-            write_batch_to_csv(REVIEW_CSV_FILE, REVIEW_FIELDNAMES, reviews_batch)
+            driver.get(url)
 
-        time.sleep(RATE_LIMIT_DELAY)
+            # 제품 정보 스크랩
+            product_name, product_data = scrape_product_details(driver)
+            write_batch_to_csv(PERFUME_CSV_FILE, PERFUME_FIELDNAMES, [product_data])
 
-        # 드라이버 풀에 반환
-        driver_pool.put(driver)
+            # 리뷰 스크랩
+            reviews_batch = scrape_reviews(driver, product_name)
+            if reviews_batch:
+                write_batch_to_csv(REVIEW_CSV_FILE, REVIEW_FIELDNAMES, reviews_batch)
 
-        return {
-            'status': 'success',
-            'product_name': product_name,
-            'review_count': len(reviews_batch),
-            'index': index,
-            'total': total
-        }
+            time.sleep(RATE_LIMIT_DELAY)
 
-    except Exception as e:
-        # 에러 발생 시에도 드라이버 반환
-        if driver:
+            # 성공 시 드라이버 풀에 반환
             driver_pool.put(driver)
 
-        return {
-            'status': 'failed',
-            'error': repr(e)[:120],
-            'url': url,
-            'index': index,
-            'total': total
-        }
+            return {
+                'status': 'success',
+                'product_name': product_name,
+                'review_count': len(reviews_batch),
+                'index': index,
+                'total': total
+            }
+
+        except InvalidSessionIdException as e:
+            # 세션 오류 시 재시도
+            retry_count += 1
+            safe_print(f"      🔄 세션 오류 발생, 재시도 {retry_count}/{max_retries}")
+
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+                # 새 드라이버 생성
+                driver = driver_pool._create_driver()
+
+            if retry_count >= max_retries:
+                # 최대 재시도 횟수 초과
+                if driver:
+                    driver_pool.put(driver)
+                return {
+                    'status': 'failed',
+                    'error': f'InvalidSessionIdException after {max_retries} retries',
+                    'url': url,
+                    'index': index,
+                    'total': total
+                }
+
+            time.sleep(5)  # 재시도 전 대기
+            continue
+
+        except Exception as e:
+            # 다른 에러 발생 시
+            if driver:
+                # 드라이버가 살아있는지 확인 후 반환
+                try:
+                    _ = driver.current_url
+                    driver_pool.put(driver)
+                except:
+                    # 죽은 드라이버는 새로 생성해서 반환
+                    try:
+                        driver.quit()
+                    except:
+                        pass
+                    new_driver = driver_pool._create_driver()
+                    driver_pool.put(new_driver)
+
+            return {
+                'status': 'failed',
+                'error': repr(e)[:120],
+                'url': url,
+                'index': index,
+                'total': total
+            }
+
+    # while 루프 종료 (여기 도달하면 안 됨)
+    return {
+        'status': 'failed',
+        'error': 'Unexpected error',
+        'url': url,
+        'index': index,
+        'total': total
+    }
 
 
 # -----------------------
