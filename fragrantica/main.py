@@ -1,5 +1,5 @@
 import time
-import traceback  # 상세 오류 출력을 위해 임포트
+import traceback
 import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.webdriver.common.by import By
