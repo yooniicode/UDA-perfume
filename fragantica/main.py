@@ -42,7 +42,7 @@ os.environ['WDM_LOG'] = '0'
 # -----------------------
 
 # --- 2.1. 기본 설정 ---
-SEARCH_KEYWORD = "acqua di parma"
+SEARCH_KEYWORD = "burberry"
 PERFUME_CSV_FILE = f'fragrantica_perfumes_{SEARCH_KEYWORD.lower().replace(" ", "-")}.csv'
 REVIEW_CSV_FILE = f'fragrantica_reviews_{SEARCH_KEYWORD.lower().replace(" ", "-")}.csv'
 
@@ -221,14 +221,7 @@ def get_notes_by_type(driver, note_type):
 
 
 # ======================================================================
-# [수정된 함수] get_undivided_notes
-# ======================================================================
-# ======================================================================
-# [수정된 함수] get_undivided_notes (XPath 전면 수정)
-# ======================================================================
-# ======================================================================
-# [수정된 함수] get_undivided_notes (XPath 전면 수정)
-# ======================================================================
+
 def get_undivided_notes(driver):
     """ 'Fragrance Notes' (통합) 헤더로 노트를 찾습니다. """
     notes = []
@@ -255,10 +248,29 @@ def get_undivided_notes(driver):
     return ", ".join(notes) if notes else ""
 
 
-# ======================================================================
+class RateLimitError(Exception):
+    """429 Too Many Requests 의심 시 사용"""
+    pass
 
 
-# ======================================================================
+def is_rate_limited_page(driver):
+    """
+    Cloudflare 429/차단 페이지 추정:
+    - 'Too Many Requests' 같은 문구
+    - Cloudflare 에러 페이지 구조 등
+    """
+    try:
+        html = driver.page_source.lower()
+    except Exception:
+        return False
+
+    keywords = [
+        "too many requests",
+        "rate limited",
+        "attention required",   # cloudflare challenge 페이지 제목
+        "error 429",
+    ]
+    return any(k in html for k in keywords)
 
 
 # ======================================================================
@@ -499,8 +511,27 @@ def scrape_reviews(driver, product_name, base_url):
         review_url = base_url + "#all-reviews"
         safe_print(f"      ... {product_name}: 리뷰 섹션으로 이동 ({review_url})")
 
-        driver.get(review_url)
-        time.sleep(4)  # 페이지 로딩 및 앵커 스크롤 대기
+        # 429 / 차단 페이지 감지용 재시도 루프
+        max_attempts = 30
+        for attempt in range(1, max_attempts + 1):
+            driver.get(review_url)
+            time.sleep(4)  # 기본 로딩 대기
+
+            if not is_rate_limited_page(driver):
+                # 정상 페이지면 바로 진행
+                break
+
+            # 여기까지 왔다 = rate limit 의심
+            wait_sec = random.randint(60, 180)  # 1~3분 랜덤 대기
+            safe_print(
+                f"      ⏱ {product_name}: 리뷰 요청이 rate limit에 걸린 것 같아요 "
+                f"({attempt}/{max_attempts}) → {wait_sec}초 대기 후 재시도"
+            )
+            time.sleep(wait_sec)
+        else:
+            # for-else: 3번 모두 rate-limited였다면 리뷰는 포기하고 넘어감
+            safe_print(f"      ❌ {product_name}: 3번 시도했지만 리뷰 페이지가 열리지 않아, 리뷰는 건너뜁니다.")
+            return []
 
         # 🔧 STEP 2: 리뷰 섹션 존재 확인
         section_exists = driver.execute_script("""
