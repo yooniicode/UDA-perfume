@@ -1,5 +1,5 @@
 import time
-import traceback  # 상세 오류 출력을 위해 임포트
+import traceback
 import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -19,7 +19,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from queue import Queue
-import random  # 랜덤 딜레이 및 UA 선택용
+import random
 
 # -----------------------
 # 1. 기본 설정 / 로그
@@ -42,15 +42,13 @@ os.environ['WDM_LOG'] = '0'
 # -----------------------
 
 # --- 2.1. 기본 설정 ---
-SEARCH_KEYWORD = "chanel"
+SEARCH_KEYWORD = "burberry"
 PERFUME_CSV_FILE = f'fragrantica_perfumes_{SEARCH_KEYWORD.lower().replace(" ", "-")}.csv'
 REVIEW_CSV_FILE = f'fragrantica_reviews_{SEARCH_KEYWORD.lower().replace(" ", "-")}.csv'
 
-# [수정] 고정 딜레이 대신 랜덤 딜레이 범위 사용 (3초 ~ 7초 사이)
 RATE_LIMIT_DELAY_RANGE = (3.0, 7.0)
 MAX_WORKERS = 3
 
-# [추가] User-Agent 리스트 (브라우저 위장)
 USER_AGENT_LIST = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -60,34 +58,11 @@ USER_AGENT_LIST = [
 ]
 
 # --- 2.2. CSV 파일 헤더 ---
-PERFUME_FIELDNAMES = [
-    'url', 'product_name', 'brand_name', 'target_gender', 'image_url',
-    'top_notes', 'middle_notes', 'base_notes',
-]
 REVIEW_FIELDNAMES = [
     'product_name', 'review_content', 'review_date', 'reviewer_name'
 ]
 
-# --- 2.3. 선택자 (Selectors) ---
-PRIMARY_PRODUCT_LINK_SELECTOR = (By.CSS_SELECTOR, "a.prefumeHbox")
-FALLBACK_PRODUCT_LINK_SELECTOR = (By.CSS_SELECTOR, "a.perfumeHbox")
-ALTERNATIVE_PRODUCT_LINK_SELECTOR = (By.CSS_SELECTOR, "div.perfume-card > a")
-
-# [제품 정보]
-PRODUCT_NAME_H1_SELECTOR = (By.CSS_SELECTOR, 'h1[itemprop="name"]')
-BRAND_NAME_SELECTOR = (By.CSS_SELECTOR, 'span[itemprop="brand"] a span')
-TARGET_GENDER_SELECTOR = (By.CSS_SELECTOR, 'h1[itemprop="name"] small')
-IMAGE_URL_SELECTOR = (By.CSS_SELECTOR, 'img[itemprop="image"]')
-
-# [리뷰 정보]
-REVIEW_HOLDER_SELECTOR = (By.ID, "all-reviews")
-REVIEW_BODY_SELECTOR = (By.CSS_SELECTOR, "div[itemprop='reviewBody']")
-REVIEW_CONTAINER_SELECTOR = (By.CSS_SELECTOR, 'div.fragrance-review-box[itemprop="review"]')
-REVIEW_CONTENT_SELECTOR = (By.CSS_SELECTOR, 'div[itemprop="reviewBody"] p')
-REVIEW_DATE_SELECTOR = (By.CSS_SELECTOR, 'span[itemprop="datePublished"]')
-REVIEWER_NAME_SELECTOR = (By.CSS_SELECTOR, 'p > b > a[href*="member"]')
-
-# --- 2.4. 스레드 락 (Locks) ---
+# --- 2.3. 스레드 락 ---
 csv_lock = threading.Lock()
 print_lock = threading.Lock()
 
@@ -105,17 +80,16 @@ class DriverPool:
         safe_print(f"\n🔧 드라이버 풀 초기화 중 ({size}개)...")
         for i in range(size):
             try:
-                # [수정] 각 드라이버에 랜덤 User-Agent 할당
                 user_agent = random.choice(USER_AGENT_LIST)
                 driver = self._create_driver(user_agent=user_agent)
                 self.pool.put(driver)
-                safe_print(f"   ✅ 드라이버 {i + 1}/{size} 생성 완료 (UA: {user_agent[:40]}...)")
+                safe_print(f"   ✅ 드라이버 {i + 1}/{size} 생성 완료")
                 time.sleep(1)
             except Exception as e:
                 safe_print(f"   ❌ 드라이버 {i + 1} 생성 실패: {repr(e)}")
         safe_print(f"✅ 드라이버 풀 준비 완료\n")
 
-    def _create_driver(self, user_agent=None):  # [수정] user_agent 인수 추가
+    def _create_driver(self, user_agent=None):
         """단일 드라이버 생성"""
         options = uc.ChromeOptions()
         options.add_argument('--no-sandbox')
@@ -124,11 +98,9 @@ class DriverPool:
         options.add_argument('--disable-extensions')
         options.add_argument('--log-level=3')
 
-        # [수정] 기본 UA 대신 선택된 랜덤 UA 적용
         if user_agent:
             options.add_argument(f'--user-agent={user_agent}')
         else:
-            # 기본 UA (폴백)
             options.add_argument(
                 '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                 'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -158,111 +130,6 @@ class DriverPool:
 # 4. 헬퍼 함수
 # -----------------------
 
-def setup_csv_files():
-    """CSV 파일이 없으면 헤더와 함께 생성."""
-    try:
-        if not os.path.exists(PERFUME_CSV_FILE):
-            with open(PERFUME_CSV_FILE, 'w', newline='', encoding='utf-8-sig') as f:
-                writer = csv.DictWriter(f, fieldnames=PERFUME_FIELDNAMES)
-                writer.writeheader()
-        if not os.path.exists(REVIEW_CSV_FILE):
-            with open(REVIEW_CSV_FILE, 'w', newline='', encoding='utf-8-sig') as f:
-                writer = csv.DictWriter(f, fieldnames=REVIEW_FIELDNAMES)
-                writer.writeheader()
-    except PermissionError as e:
-        print("\n" + "!" * 60)
-        print(f"❌ [치명적 오류] 파일 접근 권한이 없습니다: {e}")
-        print(f"   '{PERFUME_CSV_FILE}' 또는 '{REVIEW_CSV_FILE}' 파일이")
-        print("   Excel 등 다른 프로그램에서 열려 있는지 확인하고 모두 닫은 후 다시 시도하세요.")
-        print("!" * 60 + "\n")
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ CSV 파일 설정 중 알 수 없는 오류 발생: {e}")
-        sys.exit(1)
-
-
-def click_with_js(driver, element):
-    try:
-        driver.execute_script("arguments[0].click();", element)
-    except Exception:
-        pass
-
-
-def safe_find_text(driver_or_element, *selector, wait_time=2, default=""):
-    try:
-        element = WebDriverWait(driver_or_element, wait_time).until(
-            EC.presence_of_element_located(selector)
-        )
-        return element.text.strip()
-    except (NoSuchElementException, TimeoutException):
-        return default
-
-
-def safe_find_attr(driver_or_element, *selector, attr="src", wait_time=2, default=""):
-    try:
-        element = WebDriverWait(driver_or_element, wait_time).until(
-            EC.presence_of_element_located(selector)
-        )
-        return element.get_attribute(attr)
-    except (NoSuchElementException, TimeoutException):
-        return default
-
-
-def get_notes_by_type(driver, note_type):
-    """ 'Top Notes', 'Middle Notes', 'Base Notes' 헤더로 노트를 찾습니다. """
-    notes = []
-    try:
-        xpath = f"//h4[b='{note_type} Notes']/following-sibling::div[1]//div[contains(@style, 'margin')]/div[last()]"
-        note_elements = driver.find_elements(By.XPATH, xpath)
-        notes = [elem.text.strip() for elem in note_elements if elem.text.strip()]
-    except Exception:
-        pass
-    return ", ".join(notes) if notes else ""
-
-
-# ======================================================================
-# [수정된 함수] get_undivided_notes
-# ======================================================================
-# ======================================================================
-# [수정된 함수] get_undivided_notes (XPath 전면 수정)
-# ======================================================================
-# ======================================================================
-# [수정된 함수] get_undivided_notes (XPath 전면 수정)
-# ======================================================================
-def get_undivided_notes(driver):
-    """ 'Fragrance Notes' (통합) 헤더로 노트를 찾습니다. """
-    notes = []
-    try:
-        xpath = (
-            "//span[contains(., 'Fragrance Notes')]/following::div"
-            "[contains(@style, 'flex-flow: wrap') or contains(@style, 'flex-wrap: wrap')][1]"
-            "/.//div[contains(@style, 'margin')]/div[last()]"
-        )
-
-        note_elements = driver.find_elements(By.XPATH, xpath)
-
-        if not note_elements:
-            xpath_h4 = (
-                "//h4[b='Fragrance Notes']/following-sibling::div[1]"
-                "/.//div[contains(@style, 'margin')]/div[last()]"
-            )
-            note_elements = driver.find_elements(By.XPATH, xpath_h4)
-
-        notes = [elem.text.strip() for elem in note_elements if elem.text.strip()]
-    except Exception:
-        pass
-
-    return ", ".join(notes) if notes else ""
-
-
-# ======================================================================
-
-
-# ======================================================================
-
-
-# ======================================================================
-
 def write_batch_to_csv(filename, fieldnames, data_batch):
     if not data_batch:
         return
@@ -277,353 +144,258 @@ def safe_print(message):
         print(message)
 
 
-# -----------------------
-# 5. URL 수집 함수
-# -----------------------
-
-def collect_all_product_urls(start_url, max_same_rounds=3, wait_between_scrolls=2.0):
-    """Designers 페이지에서 모든 제품 URL 수집"""
-    safe_print(f"🚀 [1단계] '{start_url}'에서 URL 수집 시작...")
-    options = uc.ChromeOptions()
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--start-maximized')
-    options.add_argument(f'--user-agent={random.choice(USER_AGENT_LIST)}')
-
-    driver = uc.Chrome(options=options, use_subprocess=False)
-    wait = WebDriverWait(driver, 15)
-
-    all_product_urls_set = set()
-
-    selectors_to_try = [
-        PRIMARY_PRODUCT_LINK_SELECTOR,
-        FALLBACK_PRODUCT_LINK_SELECTOR,
-        ALTERNATIVE_PRODUCT_LINK_SELECTOR
-    ]
-    selector_in_use = None
-
+def is_rate_limited_page(driver):
+    """Cloudflare 429/차단 페이지 추정"""
     try:
-        driver.get(start_url)
-        safe_print(f"✅ '{start_url}' 접속 완료")
+        html = driver.page_source.lower()
+    except Exception:
+        return False
 
-        for i, selector in enumerate(selectors_to_try):
-            try:
-                wait.until(EC.presence_of_element_located(selector))
-                selector_in_use = selector
-                safe_print(f"🔎 선택자 #{i + 1} 로 제품 요소 확인됨.")
-                break
-            except TimeoutException:
-                safe_print(f"⚠️ 선택자 #{i + 1} 없음. 다음 시도...")
-
-        if not selector_in_use:
-            safe_print("❌ 모든 선택자로 요소를 찾지 못함. selector를 다시 확인하세요.")
-            return []
-
-        pagination_links = driver.find_elements(By.CSS_SELECTOR, 'div.pagination a')
-
-        if not pagination_links:
-            # --- Dior 방식 (무한 스크롤) ---
-            safe_print("   (i) '무한 스크롤' 방식으로 수집합니다")
-            prev_count = 0
-            same_rounds = 0
-            last_height = driver.execute_script("return document.body.scrollHeight")
-            while True:
-                try:
-                    elements = driver.find_elements(*selector_in_use)
-                    if not elements and prev_count == 0:
-                        try:
-                            wait.until(EC.presence_of_element_located(selector_in_use))
-                            elements = driver.find_elements(*selector_in_use)
-                        except TimeoutException:
-                            safe_print("... 아직 제품 요소가 없음 (잠시 후 재시도)")
-
-                    page_urls = [e.get_attribute('href') for e in elements if e.get_attribute('href')]
-                    newly_found = set(page_urls) - all_product_urls_set
-                    if newly_found:
-                        all_product_urls_set.update(newly_found)
-                        safe_print(f"➕ 새 URL {len(newly_found)}개 발견 (누적: {len(all_product_urls_set)})")
-
-                    if elements:
-                        driver.execute_script("arguments[0].scrollIntoView({behavior:'smooth', block:'end'});",
-                                              elements[-1])
-                    else:
-                        driver.execute_script("window.scrollBy(0, window.innerHeight);")
-
-                    time.sleep(wait_between_scrolls)
-
-                    try:
-                        WebDriverWait(driver, 6).until(
-                            lambda d: len(d.find_elements(*selector_in_use)) > prev_count
-                        )
-                        prev_count = len(driver.find_elements(*selector_in_use))
-                        same_rounds = 0
-                        safe_print("🔄 요소 수 증가 확인 — 계속 수집")
-                    except TimeoutException:
-                        same_rounds += 1
-                        safe_print(f"⏱ 변화 없음 (연속 {same_rounds}/{max_same_rounds})")
-
-                    new_height = driver.execute_script("return document.body.scrollHeight")
-                    if new_height == last_height:
-                        same_rounds += 1
-                        safe_print(f"📏 페이지 높이 변화 없음 (연속 증가 체크: {same_rounds})")
-                    else:
-                        last_height = new_height
-                        same_rounds = 0
-
-                    if same_rounds >= max_same_rounds:
-                        safe_print("🏁 더 이상의 콘텐츠 로드 없음으로 판단. 수집 종료.")
-                        break
-                except Exception as e:
-                    safe_print(f"⚠️ 무한 스크롤 중 예외: {repr(e)}")
-                    break
-        else:
-            safe_print("   (i) '페이지네이션' 방식으로 수집합니다")
-            page_num = 1
-            while True:
-                try:
-                    wait.until(EC.presence_of_element_located(selector_in_use))
-                    elements = driver.find_elements(*selector_in_use)
-
-                    page_urls = []
-                    for elem in elements:
-                        href = elem.get_attribute('href')
-                        if href and href.startswith("https://www.fragrantica.com/perfume/"):
-                            page_urls.append(href)
-
-                    new_urls_count = len(set(page_urls) - all_product_urls_set)
-                    all_product_urls_set.update(page_urls)
-                    safe_print(f"📄 페이지 {page_num}: {new_urls_count}개 신규 수집 (누적: {len(all_product_urls_set)}개)")
-
-                except TimeoutException:
-                    safe_print(f"⚠️  페이지 {page_num}에서 제품 링크를 찾을 수 없음")
-
-                try:
-                    next_button = wait.until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[aria-label="Next »"]'))
-                    )
-                    click_with_js(driver, next_button)
-                    time.sleep(1.5)
-                    page_num += 1
-                except (TimeoutException, NoSuchElementException):
-                    safe_print("🏁 더 이상 '다음' 페이지가 없습니다. URL 수집 종료.")
-                    break
-
-    except Exception as e:
-        safe_print(f"❌ URL 수집 중 치명적 오류: {repr(e)}")
-        traceback.print_exc()
-    finally:
-        safe_print("====== 🔧 URL 수집 드라이버 종료 ======")
-        driver.quit()
-
-    return list(all_product_urls_set)
+    keywords = [
+        "too many requests",
+        "rate limited",
+        "attention required",
+        "error 429",
+    ]
+    return any(k in html for k in keywords)
 
 
 # -----------------------
-# 6. 핵심 스크래핑 함수
+# 5. 리뷰 수집 함수
 # -----------------------
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def scrape_product_details(driver, url):
+def scrape_reviews(driver, product_name, base_url):
     """
-    제품 상세 페이지에서 향수 정보를 스크랩.
-    [수정] T/M/B 노트가 없는 경우, 'Fragrance Notes' (통합)를 middle_notes로 저장
-    """
-    wait = WebDriverWait(driver, 10)
-
-    h1_element = wait.until(
-        EC.presence_of_element_located(PRODUCT_NAME_H1_SELECTOR)
-    )
-
-    product_name = driver.execute_script(
-        "return arguments[0].firstChild.textContent.trim()", h1_element
-    )
-    brand_name = safe_find_text(h1_element, *BRAND_NAME_SELECTOR, default=SEARCH_KEYWORD.title())
-    target_gender = safe_find_text(h1_element, *TARGET_GENDER_SELECTOR, default="NA")
-
-    image_url = safe_find_attr(driver, *IMAGE_URL_SELECTOR, attr="src", default="")
-
-    # --- [수정된 노트 수집 로직] ---
-
-    # 1. 표준 T/M/B 노트를 먼저 시도
-    top_notes = get_notes_by_type(driver, "Top")
-    middle_notes = get_notes_by_type(driver, "Middle")
-    base_notes = get_notes_by_type(driver, "Base")
-
-    # 2. 만약 T/M/B가 모두 비어있다면, 'Fragrance Notes' (통합) 케이스를 시도
-    if not top_notes and not middle_notes and not base_notes:
-        safe_print(f"      ... {product_name}: T/M/B 노트 없음. 'Fragrance Notes' 통합 검색 시도...")
-        # [신규] 헬퍼 함수 호출
-        undivided_notes = get_undivided_notes(driver)
-
-        if undivided_notes:
-            # 요청대로 undivided_notes를 middle_notes에 할당
-            middle_notes = undivided_notes
-            safe_print(f"      ... {product_name}: 통합 노트 발견. Middle에 저장.")
-    # --- [수정 완료] ---
-
-    product_data = {
-        'url': url,
-        'product_name': product_name,
-        'brand_name': brand_name,
-        'target_gender': target_gender,
-        'image_url': image_url,
-        'top_notes': top_notes,
-        'middle_notes': middle_notes,
-        'base_notes': base_notes,
-    }
-
-    return product_name, product_data
-
-
-# ======================================================================
-# [수정된 함수] scrape_reviews
-# ======================================================================
-def scrape_reviews(driver, product_name):
-    """
-    [7차 수정] 'all-reviews' 섹션 감지 후, 리뷰 '컨테이너'가 로드될 때까지 대기
+    리뷰 수집 (다중 전략)
     """
     reviews_batch = []
     processed_review_identifiers = set()
 
     try:
-        # 1. 'all-reviews' 섹션이 나타날 때까지 (최대 12번) 스크롤
-        safe_print(f"      ... {product_name}: 'all-reviews' 섹션이 나타날 때까지 스크롤...")
-        reviews_section = None
-        max_scroll_attempts = 12
+        # 🔧 STEP 1: 여러 방법으로 리뷰 섹션 찾기
+        safe_print(f"      ... {product_name}: 리뷰 섹션 탐색 중...")
 
-        for attempt in range(max_scroll_attempts):
-            try:
-                # 0.5초의 짧은 대기 시간으로 'all-reviews' 요소를 찾아봄
-                reviews_section = WebDriverWait(driver, 0.5).until(
-                    EC.presence_of_element_located(REVIEW_HOLDER_SELECTOR)
-                )
-                safe_print(f"      ... {product_name}: 스크롤 {attempt + 1}회 만에 섹션 발견!")
-                break  # 찾았으면 루프 탈출
-            except TimeoutException:
-                # 못 찾았으면 한 화면 아래로 스크롤
-                driver.execute_script("window.scrollBy(0, window.innerHeight * 0.9);")
-                time.sleep(0.7)  # JS가 반응할 시간
+        # Rate limit 체크 및 재시도
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            review_url = base_url + "#all-reviews"
+            driver.get(review_url)
+            time.sleep(4)
 
-        # 2. 12번 스크롤 후에도 못 찾았으면 리뷰 0개로 처리
-        if not reviews_section:
-            safe_print(f"      ℹ️  {product_name}: {max_scroll_attempts}회 스크롤 후에도 리뷰 섹션 없음 -> 리뷰 0개")
+            if not is_rate_limited_page(driver):
+                break
+
+            wait_sec = random.randint(60, 180)
+            safe_print(
+                f"      ⏱ {product_name}: Rate limit 감지 "
+                f"({attempt}/{max_attempts}) → {wait_sec}초 대기"
+            )
+            time.sleep(wait_sec)
+        else:
+            safe_print(f"      ❌ {product_name}: Rate limit으로 리뷰 수집 실패")
             return []
 
-        # 3. 섹션을 찾았으니 해당 위치로 정확히 이동
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", reviews_section)
-        time.sleep(1)
+        # 방법 1: #all-reviews 앵커로 이동
+        section_exists = driver.execute_script("""
+            // 여러 가능한 선택자 시도
+            var section = document.getElementById('all-reviews') ||
+                         document.querySelector('[id*="review"]') ||
+                         document.querySelector('.reviews-container') ||
+                         document.querySelector('div[class*="review"]');
 
-        # 4. [수정] 무한 스크롤 루프 시작 (첫 대기 로직을 루프 안으로 이동)
-        while True:
+            if (section) {
+                section.scrollIntoView({behavior: 'smooth', block: 'center'});
+                return true;
+            }
+            return false;
+        """)
 
-            # [수정] 5. 첫 시도(리뷰가 0개)일 경우, 리뷰 '컨테이너'가 로드될 때까지 15초간 대기
-            if not processed_review_identifiers:
-                try:
-                    # 'all-reviews' 섹션이 있으니, 'review-box'가 나타날 때까지 15초 대기
-                    WebDriverWait(driver, 15).until(
-                        EC.presence_of_element_located(REVIEW_CONTAINER_SELECTOR)
+        if not section_exists:
+            # 방법 2: 리뷰 컨테이너를 직접 찾아보기
+            try:
+                review_containers = driver.find_elements(By.CSS_SELECTOR,
+                                                         'div.fragrance-review-box[itemprop="review"]')
+                if review_containers:
+                    safe_print(f"      ✅ {product_name}: 리뷰 컨테이너 직접 발견!")
+                    section_exists = True
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+                        review_containers[0]
                     )
-                    safe_print(f"      ✔ {product_name}: 리뷰 블록 감지됨! 추출 시작")
-                except TimeoutException:
-                    # [수정] 15초를 기다려도 'review-box'가 안 뜨면, 정말 리뷰가 0개인 것임
-                    safe_print(f"      ℹ️  {product_name}: 섹션은 있으나 15초 내 리뷰 로드 안됨 (리뷰 0개).")
-                    break  # while 루프 탈출
+                    time.sleep(2)
+            except:
+                pass
 
-            # --- (이하는 기존 무한 스크롤 로직과 동일) ---
+        if not section_exists:
+            safe_print(f"      ℹ️  {product_name}: 리뷰 섹션 없음 -> 리뷰 0개")
+            return []
 
-            count_before_batch = len(processed_review_identifiers)
-            review_elements = driver.find_elements(*REVIEW_CONTAINER_SELECTOR)
-            new_reviews_found_this_scroll = False
+        safe_print(f"      ✅ {product_name}: 리뷰 섹션 발견!")
+        time.sleep(2)
 
-            for review in review_elements:
+        # 🔧 STEP 2: 리뷰 컨테이너 확인
+        review_count = driver.execute_script("""
+            var reviews = document.querySelectorAll('div.fragrance-review-box[itemprop="review"]');
+            if (reviews.length === 0) {
+                reviews = document.querySelectorAll('div[class*="review-box"]') ||
+                         document.querySelectorAll('div[itemprop="review"]') ||
+                         document.querySelectorAll('.review-container');
+            }
+            return reviews.length;
+        """)
+
+        safe_print(f"      ... {product_name}: {review_count}개 리뷰 컨테이너 감지됨")
+
+        if review_count == 0:
+            safe_print(f"      ℹ️  {product_name}: 리뷰 없음 -> 리뷰 0개")
+            return []
+
+        # 🔧 STEP 3: 무한 스크롤로 모든 리뷰 로드
+        safe_print(f"      ... {product_name}: 모든 리뷰 로딩 중...")
+        previous_count = 0
+        no_change_count = 0
+        max_no_change = 5
+
+        while no_change_count < max_no_change:
+            current_count = driver.execute_script("""
+                var reviews = document.querySelectorAll('div.fragrance-review-box[itemprop="review"]');
+                if (reviews.length > 0) {
+                    reviews[reviews.length - 1].scrollIntoView({block: 'end', behavior: 'smooth'});
+                }
+                return reviews.length;
+            """)
+
+            if current_count > previous_count:
+                safe_print(f"      📝 {product_name}: {current_count}개 리뷰 로드됨...")
+                previous_count = current_count
+                no_change_count = 0
+                time.sleep(3)
+            else:
+                no_change_count += 1
+                safe_print(f"      ⏱ {product_name}: 변화 없음 ({no_change_count}/{max_no_change})")
+                time.sleep(2)
+
+        safe_print(f"      ✅ {product_name}: 총 {previous_count}개 리뷰 로드 완료")
+        time.sleep(2)
+
+        # 🔧 STEP 4: 모든 리뷰 추출
+        review_elements = driver.find_elements(By.CSS_SELECTOR, 'div.fragrance-review-box[itemprop="review"]')
+
+        # 대체 선택자 시도
+        if not review_elements:
+            safe_print(f"      ... {product_name}: 기본 선택자 실패, 대체 선택자 시도...")
+            review_elements = driver.find_elements(By.CSS_SELECTOR, 'div[itemprop="review"]')
+
+        if not review_elements:
+            review_elements = driver.find_elements(By.CSS_SELECTOR, 'div[class*="review-box"]')
+
+        safe_print(f"      ... {product_name}: {len(review_elements)}개 리뷰 추출 시작...")
+
+        for idx, review in enumerate(review_elements, 1):
+            try:
+                # 리뷰어 이름
+                reviewer_name_text = "Guest"
                 try:
-                    # 고유 ID 생성 및 중복 확인
-                    reviewer_name_text = safe_find_text(review, *REVIEWER_NAME_SELECTOR, wait_time=0.1, default="Guest")
-                    review_date_text = safe_find_text(review, *REVIEW_DATE_SELECTOR, wait_time=0.1, default="NA")
-                    content_preview = safe_find_text(review, *REVIEW_CONTENT_SELECTOR, wait_time=0.1, default="")[:20]
+                    meta_name = review.find_element(By.CSS_SELECTOR, 'meta[itemprop="name"]')
+                    reviewer_name_text = meta_name.get_attribute("content")
+                except:
+                    try:
+                        reviewer_link = review.find_element(By.CSS_SELECTOR, 'a[href*="member"]')
+                        reviewer_name_text = reviewer_link.text.strip()
+                    except:
+                        pass
 
-                    unique_id = (reviewer_name_text, review_date_text, content_preview)
+                # 날짜
+                review_date_text = "NA"
+                try:
+                    date_span = review.find_element(By.CSS_SELECTOR, 'span[itemprop="datePublished"]')
+                    review_date_text = date_span.text.strip()
+                except:
+                    try:
+                        date_meta = review.find_element(By.CSS_SELECTOR, 'meta[itemprop="datePublished"]')
+                        review_date_text = date_meta.get_attribute("content")
+                    except:
+                        pass
 
-                    if unique_id in processed_review_identifiers:
-                        continue
+                # 리뷰 내용
+                content = ""
+                try:
+                    content_div = review.find_element(By.CSS_SELECTOR, 'div[itemprop="reviewBody"]')
+                    paragraphs = content_div.find_elements(By.TAG_NAME, 'p')
+                    content = " ".join([p.text.strip() for p in paragraphs if p.text.strip()])
+                except:
+                    try:
+                        content_div = review.find_element(By.CSS_SELECTOR, 'div[itemprop="reviewBody"]')
+                        content = content_div.text.strip()
+                    except:
+                        content = review.text.strip()
 
-                    processed_review_identifiers.add(unique_id)
-                    new_reviews_found_this_scroll = True
+                # 중복 체크
+                unique_id = (reviewer_name_text, review_date_text, content[:50])
 
-                    # 내용 추출
-                    content_elements = review.find_elements(*REVIEW_CONTENT_SELECTOR)
-                    content = " ".join([p.text.strip() for p in content_elements if p.text.strip()])
+                if unique_id in processed_review_identifiers:
+                    continue
 
-                    if content:
-                        reviews_batch.append({
-                            'product_name': product_name,
-                            'review_content': content,
-                            'review_date': review_date_text,
-                            'reviewer_name': reviewer_name_text,
-                        })
-                except Exception:
-                    continue  # 개별 리뷰 오류는 무시
+                processed_review_identifiers.add(unique_id)
 
-            if new_reviews_found_this_scroll or count_before_batch == 0:
-                safe_print(f"      📝 {product_name}: {len(reviews_batch)}개 수집됨...")
+                if content:
+                    reviews_batch.append({
+                        'product_name': product_name,
+                        'review_content': content,
+                        'review_date': review_date_text,
+                        'reviewer_name': reviewer_name_text,
+                    })
 
-            # 종료 조건 1: 새 리뷰 없음
-            if not new_reviews_found_this_scroll and count_before_batch > 0:
-                safe_print(f"      🏁 {product_name}: 더 이상 새 리뷰 없음. 종료.")
-                break
+                    if idx % 20 == 0:
+                        safe_print(f"      ... {product_name}: {len(reviews_batch)}개 처리 중...")
 
-            # 다음 배치를 위해 마지막 요소로 스크롤
-            try:
-                last_element = review_elements[-1]
-                driver.execute_script("arguments[0].scrollIntoView(true);", last_element)
-            except IndexError:
-                # 스크롤할 요소가 없음 (첫 대기에서 0개면 이미 break됨)
-                break
+            except Exception as e:
+                continue
 
-                # 종료 조건 2: DOM 요소 개수 변화 대기 (8초)
-            try:
-                current_total = len(review_elements)
-                WebDriverWait(driver, 8).until(
-                    lambda d: len(d.find_elements(*REVIEW_CONTAINER_SELECTOR)) > current_total
-                )
-            except TimeoutException:
-                safe_print(f"      🏁 {product_name}: 추가 로딩 없음. 수집 완료.")
-                break
+        safe_print(f"      ✅ {product_name}: 총 {len(reviews_batch)}개 리뷰 수집 완료")
+        return reviews_batch
 
     except Exception as e:
-        safe_print(f"      ❌ {product_name}: 리뷰 수집 중 로직 에러: {repr(e)}")
-        traceback.print_exc()  # 상세 오류 확인
+        safe_print(f"      ❌ {product_name}: 리뷰 수집 에러: {repr(e)}")
 
-    safe_print(f"      ✅ {product_name}: 총 {len(reviews_batch)}개 리뷰 수집 완료")
-    return reviews_batch
+        try:
+            current_url = driver.current_url
+            safe_print(f"      ... 현재 URL: {current_url}")
+        except:
+            pass
+
+        return []
 
 
 # -----------------------
-# 7. 워커 함수
+# 6. 워커 함수
 # -----------------------
 
-def process_single_product(args, driver_pool):
-    """단일 제품 처리 (드라이버 풀 사용)."""
-    url, index, total = args
+def process_single_product_reviews_only(args, driver_pool):
+    """
+    리뷰만 수집하는 워커 함수
+    """
+    url, product_name, index, total = args
     driver = None
-    product_name = url.split('/')[-1]
 
     try:
         driver = driver_pool.get()
-        driver.get(url)
 
-        product_name, product_data = scrape_product_details(driver, url)
-        write_batch_to_csv(PERFUME_CSV_FILE, PERFUME_FIELDNAMES, [product_data])
+        safe_print(f"      ... {product_name}: 리뷰 수집 시작")
 
-        reviews_batch = scrape_reviews(driver, product_name)
+        # 리뷰 수집
+        reviews_batch = scrape_reviews(driver, product_name, url)
+
+        # CSV 저장
         if reviews_batch:
             write_batch_to_csv(REVIEW_CSV_FILE, REVIEW_FIELDNAMES, reviews_batch)
 
-        # [수정] 고정 딜레이 대신 랜덤 딜레이 적용
+        # 딜레이
         delay = random.uniform(*RATE_LIMIT_DELAY_RANGE)
         safe_print(f"      ... 다음 작업까지 {delay:.1f}초 대기 ...")
         time.sleep(delay)
 
+        # 드라이버 반환
         driver_pool.put(driver)
 
         return {
@@ -643,7 +415,6 @@ def process_single_product(args, driver_pool):
                 pass
 
             try:
-                # [수정] 드라이버 재생성 시에도 랜덤 UA 적용
                 new_user_agent = random.choice(USER_AGENT_LIST)
                 new_driver = driver_pool._create_driver(user_agent=new_user_agent)
                 driver_pool.put(new_driver)
@@ -655,61 +426,100 @@ def process_single_product(args, driver_pool):
         return {
             'status': 'failed',
             'error': repr(e)[:120],
-            'url': url,
+            'product_name': product_name,
             'index': index,
             'total': total
         }
 
 
 # -----------------------
-# 8. 메인 실행
+# 7. 메인 함수
 # -----------------------
 
-def main():
-    """메인 실행 함수 (드라이버 풀 사용)."""
+def main_review_only():
+    """
+    기존 향수 목록 CSV에서 URL을 읽어와서 리뷰만 수집
+    """
     start_time = time.time()
 
     print("=" * 60)
-    print(f"🚀 Fragrantica 크롤러 시작 (키워드: {SEARCH_KEYWORD})")
+    print(f"🚀 Fragrantica 리뷰 전용 크롤러 시작")
+    print(f"   (키워드: {SEARCH_KEYWORD})")
     print(f"   (드라이버 풀: {MAX_WORKERS}개)")
     print("=" * 60)
 
-    setup_csv_files()
-
-    formatted_keyword = SEARCH_KEYWORD.title()
-    formatted_keyword = formatted_keyword.replace(" ", "-")
-    start_url = f"https://www.fragrantica.com/designers/{formatted_keyword}.html"
-
-    url_collection_start = time.time()
-    product_urls = collect_all_product_urls(start_url)
-    url_collection_time = time.time() - url_collection_start
-
-    if not product_urls:
-        print(f"❌ '{SEARCH_KEYWORD}'(변환: {formatted_keyword})에 대한 URL이 수집되지 않았습니다. 종료합니다.")
+    # 1️⃣ 기존 향수 CSV 파일 확인
+    if not os.path.exists(PERFUME_CSV_FILE):
+        print(f"\n❌ 오류: '{PERFUME_CSV_FILE}' 파일이 존재하지 않습니다!")
+        print(f"   먼저 향수 목록을 수집하거나, 파일명을 확인해주세요.")
         return
 
-    print(f"✅ 총 {len(product_urls)}개 제품 발견 (소요 시간: {url_collection_time:.1f}초)")
+    # 2️⃣ 리뷰 CSV 파일 초기화
+    try:
+        if not os.path.exists(REVIEW_CSV_FILE):
+            with open(REVIEW_CSV_FILE, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.DictWriter(f, fieldnames=REVIEW_FIELDNAMES)
+                writer.writeheader()
+            print(f"✅ 리뷰 CSV 파일 생성: {REVIEW_CSV_FILE}")
+    except PermissionError as e:
+        print("\n" + "!" * 60)
+        print(f"❌ [치명적 오류] 파일 접근 권한이 없습니다: {e}")
+        print(f"   '{REVIEW_CSV_FILE}' 파일이 Excel 등에서 열려있는지 확인하세요.")
+        print("!" * 60 + "\n")
+        sys.exit(1)
 
+    # 3️⃣ 향수 목록 CSV에서 URL 읽기
+    print(f"\n📂 '{PERFUME_CSV_FILE}'에서 URL 로딩 중...")
+    product_data_list = []
+
+    try:
+        with open(PERFUME_CSV_FILE, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get('url') and row.get('product_name'):
+                    product_data_list.append({
+                        'url': row['url'],
+                        'product_name': row['product_name']
+                    })
+    except Exception as e:
+        print(f"❌ CSV 파일 읽기 오류: {e}")
+        return
+
+    if not product_data_list:
+        print(f"❌ '{PERFUME_CSV_FILE}'에서 유효한 URL을 찾지 못했습니다.")
+        return
+
+    print(f"✅ 총 {len(product_data_list)}개 제품 발견")
+
+    # 4️⃣ 예상 시간 계산
     avg_delay = sum(RATE_LIMIT_DELAY_RANGE) / 2
-    avg_time_per_product = 8 + avg_delay
-    estimated_time_parallel = (len(product_urls) * avg_time_per_product) / MAX_WORKERS
-    print(f"\n📊 예상 소요 시간 ({MAX_WORKERS}개 병렬, 평균 딜레이 {avg_delay:.1f}초 포함): 약 {estimated_time_parallel / 60:.1f}분")
+    avg_time_per_product = 12 + avg_delay
+    estimated_time_parallel = (len(product_data_list) * avg_time_per_product) / MAX_WORKERS
+    print(f"\n📊 예상 소요 시간 ({MAX_WORKERS}개 병렬): 약 {estimated_time_parallel / 60:.1f}분")
 
+    # 5️⃣ 드라이버 풀 초기화
     driver_pool = DriverPool(size=MAX_WORKERS)
 
-    print("\n[2단계] 제품 스크래핑 시작 (드라이버 풀 사용)...")
+    print("\n[리뷰 수집 시작]")
     print("-" * 60)
 
     scraping_start = time.time()
-    total = len(product_urls)
-    tasks = [(url, i + 1, total) for i, url in enumerate(product_urls)]
+    total = len(product_data_list)
+
+    # 6️⃣ 작업 준비
+    tasks = [
+        (item['url'], item['product_name'], i + 1, total)
+        for i, item in enumerate(product_data_list)
+    ]
 
     success_count = 0
     failed_count = 0
+    total_reviews = 0
 
+    # 7️⃣ 병렬 처리
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
-            executor.submit(process_single_product, task, driver_pool): task
+            executor.submit(process_single_product_reviews_only, task, driver_pool): task
             for task in tasks
         }
 
@@ -719,39 +529,52 @@ def main():
 
             if result['status'] == 'success':
                 success_count += 1
+                total_reviews += result['review_count']
+
                 if result['review_count'] > 0:
                     safe_print(
-                        f"[{result['index']}/{result['total']} ({percentage:.1f}%)] ✅ {result['product_name']} - 리뷰 {result['review_count']}개")
+                        f"[{result['index']}/{result['total']} ({percentage:.1f}%)] "
+                        f"✅ {result['product_name']} - 리뷰 {result['review_count']}개"
+                    )
                 else:
                     safe_print(
-                        f"[{result['index']}/{result['total']} ({percentage:.1f}%)] ✅ {result['product_name']} - 제품 정보만")
+                        f"[{result['index']}/{result['total']} ({percentage:.1f}%)] "
+                        f"ℹ️  {result['product_name']} - 리뷰 없음"
+                    )
             else:
                 failed_count += 1
                 safe_print(
-                    f"[{result['index']}/{result['total']} ({percentage:.1f}%)] ❌ 처리 실패 - {result['url']} - {result['error']}")
+                    f"[{result['index']}/{result['total']} ({percentage:.1f}%)] "
+                    f"❌ {result['product_name']} - 처리 실패: {result['error']}"
+                )
 
+    # 8️⃣ 드라이버 풀 종료
     print("\n🔧 드라이버 풀 종료 중...")
     driver_pool.close_all()
 
     scraping_time = time.time() - scraping_start
     total_time = time.time() - start_time
 
+    # 9️⃣ 최종 결과 출력
     print("-" * 60)
     print("\n" + "=" * 60)
-    print("✅ 모든 크롤링 완료!")
+    print("✅ 리뷰 수집 완료!")
     print("=" * 60)
     print(f"\n📊 통계:")
     print(f"   - 성공: {success_count}개")
     print(f"   - 실패: {failed_count}개")
+    print(f"   - 총 리뷰 수: {total_reviews}개")
     print(f"\n⏱️  소요 시간:")
-    print(f"   - URL 수집: {url_collection_time:.1f}초")
-    print(f"   - 제품 스크래핑: {scraping_time / 60:.1f}분")
+    print(f"   - 리뷰 수집: {scraping_time / 60:.1f}분")
     print(f"   - 전체: {total_time / 60:.1f}분")
     print(f"\n📁 저장된 파일:")
-    print(f"   - {PERFUME_CSV_FILE}")
     print(f"   - {REVIEW_CSV_FILE}")
     print("=" * 60)
 
 
+# -----------------------
+# 8. 실행
+# -----------------------
+
 if __name__ == "__main__":
-    main()
+    main_review_only()
