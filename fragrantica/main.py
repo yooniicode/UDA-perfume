@@ -42,7 +42,7 @@ os.environ['WDM_LOG'] = '0'
 # -----------------------
 
 # --- 2.1. 기본 설정 ---
-SEARCH_KEYWORD = "chloe"
+SEARCH_KEYWORD = "clean"
 PERFUME_CSV_FILE = f'fragrantica_perfumes_{SEARCH_KEYWORD.lower().replace(" ", "-")}.csv'
 REVIEW_CSV_FILE = f'fragrantica_reviews_{SEARCH_KEYWORD.lower().replace(" ", "-")}.csv'
 
