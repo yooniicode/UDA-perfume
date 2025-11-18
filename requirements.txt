@@ -1,9 +1,28 @@
-# requirements.txt
+# --- Core Selenium & WebDriver ---
+selenium>=4.0.0,<5.0.0
+undetected-chromedriver>=3.5.0,<4.0.0
 
-undetected-chromedriver>=3.5.0
-selenium>=4.0.0
-tqdm>=4.65.0
-tenacity>=8.0.0
+# --- Stealth & Anti-Detection ---
+selenium-stealth>=1.0.6
+
+# --- Progress & Retry ---
+tqdm>=4.65.0          # 진행 표시줄
+tenacity>=8.0.0       # 재시도 로직
+
+# --- Optional: Data Processing ---
+pandas>=2.0.0       # 데이터 분석 및 CSV 처리
+openpyxl>=3.1.0     # Excel 파일 처리
+
+# --- Optional: Advanced Features ---
+# fake-useragent>=1.4.0    # 랜덤 User-Agent 생성
+# python-dotenv>=1.0.0     # 환경변수 관리
+# beautifulsoup4>=4.12.0   # HTML 파싱 (Selenium 대안)
+# lxml>=4.9.0              # 빠른 HTML/XML 파싱
+
+# ============================================================
+# 설치 방법:
+# pip install -r requirements.txt
+# ============================================================
 
 setuptools
 undetected-chromedriver
